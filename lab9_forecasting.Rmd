@@ -1,0 +1,121 @@
+---
+title: "lab_9_forecasting"
+author: "Ali Martin"
+date: "3/3/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
+library(tidyverse)
+library(here)
+library(broom)
+
+library(tsibble)
+library(feasts)
+library(fable)
+```
+
+## Read in the data and convert to time series
+
+-similar to whole winters forecasting method! 
+
+```{r}
+energy <- read_csv(here('data','energy.csv')) #month column is just a character column
+
+## turn to time series
+energy_ts <- energy %>% 
+  mutate(date = tsibble::yearmonth(month)) %>%  #turn month column to a date into a time series R will recognize as year and month, this creates a new column
+  as_tsibble(key = NULL, index = date) #use the date column as the time index
+```
+
+
+### Exploratory plotting 
+
+```{r}
+ggplot(energy_ts, aes(x = date, y = res_total)) +
+  geom_line() +
+  labs(y  ='Residential Energy Consumption \n (Trillion BTU)') #\n puts a line break 
+
+## we can see a trend in the overall level and we can see some seasonality and regular spikes, there are big spikes continuous across the time series, but there is also a counter cyclical pattern that are little spikes (on the bottom)
+```
+
+### Do a season plot 
+
+```{r}
+energy_ts %>% 
+  gg_season(y = res_total) + 
+  theme_minimal() +
+  scale_color_viridis_c() + 
+  labs(x = "Month",
+       y = "Residential energy consumption (trillion BTU)")
+```
+
+```{r}
+energy_ts %>% gg_subseries() # put separate plot for each month over a 40 year time span
+  
+```
+
+### Decomposition
+
+```{r}
+# generate rend based on a moving average window
+dcmp <- energy_ts %>% 
+  model(STL(res_total ~ season())) #calculate the trends
+
+components(dcmp) %>% #take components and put them into autoplot
+  autoplot() +
+  theme_minimal()
+
+# shows the original time series, the trend it is calculating, and calculates seasonality trends and the bottom is the residual
+  
+```
+
+### Autocorrelation function
+
+```{r}
+energy_ts %>% 
+  ACF(res_total) %>% #calculate autocorrelation func based on residential total
+  autoplot() 
+  ## winter and summer variation is a lot less pronounced
+## the lag compares all of the januaries and all of the februaries.. etc. 
+```
+
+### Forecasting
+
+```{r}
+energy_fit <- energy_ts %>% 
+  model(ets = ETS(res_total ~ season ('M'))) #ets is best for additive models, diff way of optimizing parameters, create ETS model for res_total as a function of season
+# M means it is a multiplicative model 
+
+energy_forecast <- energy_fit %>% 
+  forecast(h = '10 years') #h is a time horizon 
+# creating a ten year time span of residential total prediction
+
+energy_forecast %>% ##pass predicted value to an autoplot
+  autoplot(energy_ts) #you can plot the original time series and it will also plot the forecasted time series too (in blue)
+
+## there is not a strong upward trend 
+## the level is the confidence level
+```
+
+- we want our residuals to be around zero and not have any patterns to them 
+
+```{r}
+energy_predicted <- broom::augment(energy_fit) #take the model we created and compare that to observed data and make it into a new column and it will show the residual value
+
+ggplot(energy_predicted) +
+  geom_line(aes(x = date, y = res_total)) + #compare orig time data to residual
+  geom_line(aes(x = date, y = .fitted), color = 'red', alpha = .7) #alpha makes it a little transparent
+```
+
+```{r}
+## look at disrtibution of those residuals 
+ggplot(data = energy_predicted, aes(x = .resid)) +
+  geom_histogram() #our residuals are centered around 0 which is what we want, it is a reasonably sound prediction 
+```
+
+-look at code key for other forecasting methods 
+
+
